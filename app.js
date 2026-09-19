@@ -1,0 +1,436 @@
+/* Tables d'Addition — logique de l'app.
+ *
+ * La coque PWA (service worker, bandeau installer, stockage, sons, série de
+ * jours…) vient d'AppEngine (engine/engine.js). Ici : le jeu et le bilan.
+ */
+(function () {
+  'use strict';
+
+  const APP_VERSION = 'v1.0.1';
+  const E = window.AppEngine;
+  const D = window.APP_DATA;
+  const $ = E.$;
+
+  E.boot({
+    id: 'tables-addition',
+    version: APP_VERSION,
+    strings: {
+      weekNotPlayed: 'pas joué',
+      weekSummary: (seen, days, rate) =>
+        `${seen} questions sur ${days} jour${days > 1 ? 's' : ''} — ${rate}% de réussite`,
+      streak: (n) => `🔥 ${n} jour${n > 1 ? 's' : ''} d'affilée`,
+    },
+  });
+
+  /* ------------------------------------------------------------------ État */
+  let selected = [];            // tables cochées
+  let soundOn = true;
+
+  let queue = [];               // questions restantes (la courante est sortie)
+  let lastOps = [];             // questions de la dernière partie (pour « Recommencer »)
+  let errorCounts = {};         // erreurs de la partie : clé -> nombre
+  let slowSet = new Set();      // bonnes réponses trop lentes
+  let opTimes = {};             // meilleur temps de bonne réponse : clé -> ms
+  let tableStats = {};          // table -> { asked, correct }
+  let correctCount = 0;
+  let wrongCount = 0;
+  let totalOps = 0;
+  let current = null;           // [a, b]
+  let answered = false;
+  let answerStr = '';
+  let startedAt = 0;
+  let advanceTimer = null;
+  let mascotIdx = 0;
+  let committed = true;         // la partie en cours a-t-elle déjà été enregistrée ?
+
+  const keyOf = (a, b) => `${a}+${b}`;
+  const parseKey = (k) => k.split('+').map(Number);
+  const range = (min, max) => Array.from({ length: max - min + 1 }, (_, i) => min + i);
+  const allTables = range(D.tables.min, D.tables.max);
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  /* ------------------------------------------------------------ Préférences */
+  function loadPrefs() {
+    const p = E.store.load('prefs', {});
+    const saved = Array.isArray(p.tables)
+      ? p.tables.map(Number).filter((n) => allTables.includes(n))
+      : [];
+    selected = saved.length ? [...new Set(saved)] : D.tables.defaults.slice();
+    soundOn = typeof p.sound === 'boolean' ? p.sound : true;
+    if (!soundOn) E.sound.enable(false);   // enable(true) créerait l'AudioContext avant tout geste
+  }
+  function savePrefs() {
+    E.store.save('prefs', { tables: selected.slice(), sound: soundOn });
+  }
+
+  function loadErrorHistory() {
+    const h = E.store.load('errors', {});
+    return h && typeof h === 'object' && !Array.isArray(h) ? h : {};
+  }
+
+  /* --------------------------------------------------- Écran 1 : les tables */
+  const grid = $('#tables-grid');
+  const startBtn = $('#start-btn');
+
+  function renderTableButtons() {
+    grid.innerHTML = '';
+    allTables.forEach((t) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'table-btn';
+      btn.textContent = String(t);
+      btn.dataset.table = String(t);
+      btn.setAttribute('aria-label', `Table de ${t}`);
+      grid.appendChild(btn);
+    });
+    syncTableButtons();
+  }
+
+  function syncTableButtons() {
+    grid.querySelectorAll('.table-btn').forEach((btn) => {
+      const on = selected.includes(Number(btn.dataset.table));
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', String(on));
+    });
+    startBtn.disabled = selected.length === 0;
+  }
+
+  function toggleTable(t) {
+    selected = selected.includes(t) ? selected.filter((x) => x !== t) : [...selected, t];
+    syncTableButtons();
+    savePrefs();
+  }
+
+  grid.addEventListener('click', (e) => {
+    const btn = e.target.closest('.table-btn');
+    if (btn) toggleTable(Number(btn.dataset.table));
+  });
+  $('#select-all-btn').addEventListener('click', () => {
+    selected = allTables.slice();
+    syncTableButtons();
+    savePrefs();
+  });
+  $('#deselect-btn').addEventListener('click', () => {
+    selected = [];
+    syncTableButtons();
+    savePrefs();
+  });
+
+  const soundToggle = $('#sound-toggle');
+  soundToggle.addEventListener('change', () => {
+    soundOn = soundToggle.checked;
+    E.sound.enable(soundOn);
+    savePrefs();
+  });
+
+  $('#reset-progress').addEventListener('click', () => {
+    const ok = window.confirm(
+      'Effacer toute la progression ?\n(historique des erreurs et série de jours)');
+    if (!ok) return;
+    ['errors', 'streak', 'daily'].forEach((k) => E.store.remove(k));
+    window.location.reload();
+  });
+
+  /* ----------------------------------------------------- Écran 2 : la partie */
+  const answerEl = $('#answer');
+  const feedbackEl = $('#feedback');
+  const nextBtn = $('#next-btn');
+  const cardEl = $('#question-card');
+  const mascotEl = $('#mascot');
+  const submitBtn = $('#submit-btn');
+
+  function buildOps() {
+    const ops = [];
+    selected.forEach((t) => {
+      range(D.terms.min, D.terms.max).forEach((i) => ops.push([t, i]));
+    });
+    return ops;
+  }
+
+  function startGame(ops) {
+    const list = ops && ops.length ? ops : buildOps();
+    if (!list.length) return;
+    clearTimeout(advanceTimer);
+    lastOps = list.map((o) => o.slice());
+    queue = shuffle(list);
+    errorCounts = {};
+    slowSet = new Set();
+    opTimes = {};
+    tableStats = {};
+    correctCount = 0;
+    wrongCount = 0;
+    totalOps = queue.length;
+    mascotIdx = 0;
+    committed = false;
+    savePrefs();
+    E.sound.resume();
+    E.screens.show('screen-play');
+    updateScore();
+    nextQuestion();
+  }
+
+  function nextQuestion() {
+    clearTimeout(advanceTimer);
+    advanceTimer = null;
+    if (!queue.length) {
+      showResults();
+      return;
+    }
+    current = queue.shift();
+    answered = false;
+    answerStr = '';
+    window.scrollTo(0, 0);
+
+    answerEl.textContent = '';
+    answerEl.className = 'answer-input';
+    submitBtn.disabled = false;
+    feedbackEl.textContent = '';
+    feedbackEl.className = 'feedback';
+    nextBtn.classList.remove('visible');
+
+    const q = $('#question-text');
+    q.textContent = '';
+    q.append(`${current[0]} `);
+    q.append(span('op-symbol', '+'));
+    q.append(` ${current[1]} `);
+    q.append(span('equals', '='));
+
+    mascotEl.textContent = D.mascots[mascotIdx % D.mascots.length];
+    mascotIdx++;
+    startedAt = Date.now();
+  }
+
+  function span(cls, text) {
+    const s = document.createElement('span');
+    s.className = cls;
+    s.textContent = text;
+    return s;
+  }
+
+  function checkAnswer() {
+    if (answered || answerStr === '' || !current) return;
+
+    const [a, b] = current;
+    const expected = a + b;
+    const ok = parseInt(answerStr, 10) === expected;
+    const key = keyOf(a, b);
+    const elapsed = Date.now() - startedAt;
+    answered = true;
+    submitBtn.disabled = true;
+
+    const stat = tableStats[a] || (tableStats[a] = { asked: 0, correct: 0 });
+    stat.asked++;
+    E.sound.feedback(ok);
+
+    if (ok) {
+      correctCount++;
+      stat.correct++;
+      if (!(key in opTimes) || elapsed < opTimes[key]) opTimes[key] = elapsed;
+      const slow = elapsed > D.slowMs;
+      if (slow) slowSet.add(key); else slowSet.delete(key);
+      answerEl.classList.add('correct-input');
+      feedbackEl.textContent = `✅ Bravo ! ${a} + ${b} = ${expected}${slow ? ' (un peu lent 🐢)' : ''}`;
+      feedbackEl.className = 'feedback correct';
+      mascotEl.textContent = '🎉';
+      E.fx.burst(true);
+      E.haptic('success');
+      advanceTimer = setTimeout(nextQuestion, 850);
+    } else {
+      wrongCount++;
+      errorCounts[key] = (errorCounts[key] || 0) + 1;
+      answerEl.classList.add('wrong-input');
+      const strong = document.createElement('strong');
+      strong.textContent = String(expected);
+      feedbackEl.textContent = '❌ Pas tout à fait… La réponse était ';
+      feedbackEl.appendChild(strong);
+      feedbackEl.className = 'feedback wrong';
+      mascotEl.textContent = '😬';
+      cardEl.classList.add('shake');
+      setTimeout(() => cardEl.classList.remove('shake'), 400);
+      E.haptic('error');
+      // La question ratée revient quelques questions plus loin.
+      const pos = Math.floor(Math.random() * Math.min(D.requeueSpan, queue.length + 1)) + 1;
+      queue.splice(pos, 0, current);
+      nextBtn.classList.add('visible');
+    }
+    updateScore();
+  }
+
+  function updateScore() {
+    const remaining = Math.max(totalOps - correctCount, 0);
+    $('#score-correct').textContent = String(correctCount);
+    $('#score-wrong').textContent = String(wrongCount);
+    $('#score-remaining').textContent = String(remaining);
+    $('#progress-text').textContent = `${correctCount} / ${totalOps}`;
+    $('#progress-fill').style.width = `${totalOps ? Math.round((correctCount / totalOps) * 100) : 0}%`;
+  }
+
+  function numpadPress(k) {
+    if (answered) return;
+    if (k === 'clear') answerStr = '';
+    else if (k === 'del') answerStr = answerStr.slice(0, -1);
+    else if (answerStr.length < D.maxDigits) answerStr += k;
+    else return;
+    answerEl.textContent = answerStr;
+    E.haptic('tap');
+  }
+
+  $('#numpad').addEventListener('click', (e) => {
+    const btn = e.target.closest('.numpad-btn');
+    if (btn) numpadPress(btn.dataset.key);
+  });
+  submitBtn.addEventListener('click', checkAnswer);
+  nextBtn.addEventListener('click', nextQuestion);
+  $('#quit-btn').addEventListener('click', () => {
+    clearTimeout(advanceTimer);
+    commitSession();
+    E.screens.show('screen-home');
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (E.screens.current() !== 'screen-play') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const onButton = e.target.closest && e.target.closest('button');
+    if (e.key === 'Enter') {
+      if (onButton) return;                    // le bouton gère déjà son propre « clic »
+      e.preventDefault();
+      if (answered) nextQuestion(); else checkAnswer();
+    } else if (/^[0-9]$/.test(e.key)) {
+      numpadPress(e.key);
+    } else if (e.key === 'Backspace') {
+      e.preventDefault();
+      numpadPress('del');
+    } else if (e.key.toLowerCase() === 'c') {
+      numpadPress('clear');
+    }
+  });
+
+  /* -------------------------------------------------------- Enregistrement */
+  // Une partie est enregistrée une seule fois : à la fin, ou quand on la quitte
+  // en cours de route (ce qui a été répondu compte quand même).
+  function commitSession() {
+    if (committed) return;
+    committed = true;
+    const seen = correctCount + wrongCount;
+    if (!seen) return;
+    const hist = loadErrorHistory();
+    Object.keys(errorCounts).forEach((k) => { hist[k] = (hist[k] || 0) + errorCounts[k]; });
+    E.store.save('errors', hist);
+    E.history.bumpStreak();
+    E.history.logDaily(seen, correctCount);
+    E.history.renderStreak('#streak-badge');
+  }
+
+  /* ---------------------------------------------------------- Écran 3 : bilan */
+  const fmtTime = (ms) => `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
+  const barColor = (pct) => (pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--yellow)' : 'var(--red)');
+
+  function showResults() {
+    const total = correctCount + wrongCount;
+    const rate = total > 0 ? Math.round((correctCount / total) * 100) : 100;
+    const tier = D.tiers.find((t) => rate >= t.min) || D.tiers[D.tiers.length - 1];
+
+    $('#res-correct').textContent = String(correctCount);
+    $('#res-wrong').textContent = String(wrongCount);
+    $('#res-rate').textContent = `${rate}%`;
+    $('#result-emoji').textContent = tier.emoji;
+    $('#result-title').textContent = tier.title;
+    $('#result-subtitle').textContent = tier.sub.replace('{rate}', String(rate));
+
+    commitSession();
+    E.history.renderWeek({ bars: '#week-bars', block: '#history-week', summary: '#week-summary' });
+    renderTableSummary();
+    renderErrorReport();
+    $('#review-btn').disabled = Object.keys(errorCounts).length === 0 && slowSet.size === 0;
+
+    E.screens.show('screen-done');
+    E.fx.burst(rate >= 80);
+    E.announce(`Partie terminée. ${tier.title} ${correctCount} bonnes réponses, ${wrongCount} erreurs.`);
+  }
+
+  function renderTableSummary() {
+    const wrap = $('#table-summary-list');
+    const block = $('#table-summary');
+    wrap.innerHTML = '';
+    const tables = Object.keys(tableStats).map(Number).sort((a, b) => a - b);
+    block.hidden = tables.length === 0;
+
+    tables.forEach((t) => {
+      const { asked, correct } = tableStats[t];
+      const pct = asked > 0 ? Math.round((correct / asked) * 100) : 100;
+      const row = document.createElement('div');
+      row.className = 'table-summary-row';
+      const fill = span('tbar-fill', '');
+      fill.style.width = `${pct}%`;
+      fill.style.background = barColor(pct);
+      const bar = span('tbar', '');
+      bar.appendChild(fill);
+      const pctEl = span('tpct', `${pct}%`);
+      pctEl.style.color = barColor(pct);
+      row.append(span('tname', `Table de ${t}`), bar, pctEl);
+      wrap.appendChild(row);
+    });
+  }
+
+  function renderErrorReport() {
+    const list = $('#error-list');
+    list.innerHTML = '';
+    const keys = new Set([...Object.keys(errorCounts), ...slowSet]);
+    if (keys.size === 0) {
+      list.appendChild(span('no-errors', '🎉 Aucune erreur, bravo !'));
+      return;
+    }
+
+    const history = loadErrorHistory();
+    const entries = [...keys].sort((ka, kb) => {
+      const diff = (errorCounts[kb] || 0) - (errorCounts[ka] || 0);
+      return diff || (opTimes[kb] || 0) - (opTimes[ka] || 0);
+    });
+
+    entries.forEach((key) => {
+      const [a, b] = parseKey(key);
+      const count = errorCounts[key] || 0;
+      const row = document.createElement('div');
+      row.className = 'error-row';
+
+      const op = span('op', `${a} `);
+      op.append(span('x', '+'), ` ${b} = `, span('res', String(a + b)));
+      if (key in opTimes) op.append(span('time', `⏱ ${fmtTime(opTimes[key])}`));
+
+      const meta = span('error-row-meta', '');
+      if (history[key]) meta.append(span('history', `total : ${history[key]}`));
+      const badge = span('count', count > 1 ? `${count} erreurs` : '1 erreur');
+      if (count === 0) {
+        badge.textContent = '🐢 hésitation';
+        badge.classList.add('error-badge--hesitant');
+      }
+      meta.append(badge);
+
+      row.append(op, meta);
+      list.appendChild(row);
+    });
+  }
+
+  $('#review-btn').addEventListener('click', () => {
+    const keys = new Set([...Object.keys(errorCounts), ...slowSet]);
+    startGame([...keys].map(parseKey));
+  });
+  $('#print-btn').addEventListener('click', () => window.print());
+  $('#again-btn').addEventListener('click', () => startGame(lastOps));
+  $('#home-btn').addEventListener('click', () => E.screens.show('screen-home'));
+
+  /* ---------------------------------------------------------------- Démarrage */
+  loadPrefs();
+  soundToggle.checked = soundOn;
+  renderTableButtons();
+  startBtn.addEventListener('click', () => startGame());
+  E.screens.show('screen-home', { focus: false });
+})();
