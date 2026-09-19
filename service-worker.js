@@ -8,7 +8,7 @@
  *     puis ajoute tout nouveau fichier statique a APP_SHELL ci-dessous.
  */
 self.APP_SLUG = 'tables-addition';
-self.APP_VERSION = 'v1.0.4';
+self.APP_VERSION = 'v1.0.5';
 
 self.APP_SHELL = [
   './',
