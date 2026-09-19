@@ -31,6 +31,9 @@ esprit que l'appli des tables de multiplication.
   ratées qui reviennent comptent ; le chrono se met en pause quand l'appli n'est plus à l'écran)
   et on garde le **meilleur temps** pour chaque ensemble de tables. Le bilan affiche le temps et
   le record (« Nouveau record ! »). Pas de record pour une partie de révision.
+- **🕳️ Calcul à trous** (option) : chaque question cache au hasard le résultat, le premier ou le
+  deuxième nombre (`? + 7 = 12`), et il faut trouver le nombre manquant. Après une erreur, la
+  réponse s'affiche avec l'opération complète. Le record du mode « contre la montre » est séparé.
 - **Barre de progression** + score en direct (✅ succès / ❌ erreurs / 🔵 restantes).
 - **Écran de bilan** :
   - emoji + phrase selon le taux de réussite ;
@@ -78,11 +81,11 @@ Clés `localStorage`, préfixées par `tables-addition:` :
 
 | Donnée | Clé |
 |---|---|
-| Tables cochées + options « petits sons » et « contre la montre » | `prefs` |
+| Tables cochées + options « petits sons », « contre la montre » et « calcul à trous » | `prefs` |
 | Total cumulé d'erreurs par addition (`a+b`) | `errors` |
 | Série de jours d'affilée | `streak` |
 | Questions par jour (60 jours, pour le graphique 7 j) | `daily` |
-| Meilleur temps par ensemble de tables (mode « contre la montre ») | `records` |
+| Meilleur temps par ensemble de tables, avec ou sans « calcul à trous » (mode « contre la montre ») | `records` |
 | Bandeau « Installer » masqué | `install-hidden` |
 
 Le lien **« Réinitialiser la progression »** efface `errors`, `streak`, `daily` et `records`
@@ -166,6 +169,6 @@ Les couleurs et proportions sont en haut du script. Il écrit `icons/*.png` et
 
 ## Idées d'évolution
 
-- Nombre manquant (`7 + ? = 12`) ou soustractions associées.
+- Soustractions associées.
 - Défi 60 secondes (compte à rebours).
 - Choix du nombre de questions par partie.
