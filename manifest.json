@@ -3,7 +3,7 @@
   "name": "Tables d'Addition",
   "short_name": "Additions",
   "description": "Entraîne-toi aux tables d'addition avec un rapport d'erreurs et un bilan par table.",
-  "version": "v1.0.2",
+  "version": "v1.0.3",
   "lang": "fr",
   "dir": "ltr",
   "start_url": "./index.html",
