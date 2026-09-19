@@ -42,6 +42,8 @@ esprit que l'appli des tables de multiplication.
 - **🔥 Série de jours** : un badge s'affiche en haut quand on joue plusieurs
   jours de suite.
 - **Hors-ligne complet** : au premier chargement, tout est mis en cache.
+- **Mises à jour sans surprise** : une nouvelle version n'est appliquée que
+  depuis l'écran d'accueil, jamais en pleine partie ni pendant la lecture du bilan.
 
 ## Comment jouer
 

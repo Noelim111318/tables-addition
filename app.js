@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 'v1.0.1';
+  const APP_VERSION = 'v1.0.2';
   const E = window.AppEngine;
   const D = window.APP_DATA;
   const $ = E.$;
@@ -14,6 +14,7 @@
   E.boot({
     id: 'tables-addition',
     version: APP_VERSION,
+    autoReload: false,      // voir « Mises à jour » plus bas : jamais en pleine partie
     strings: {
       weekNotPlayed: 'pas joué',
       weekSummary: (seen, days, rate) =>
@@ -283,10 +284,14 @@
     E.haptic('tap');
   }
 
-  $('#numpad').addEventListener('click', (e) => {
+  const numpad = $('#numpad');
+  numpad.addEventListener('click', (e) => {
     const btn = e.target.closest('.numpad-btn');
     if (btn) numpadPress(btn.dataset.key);
   });
+  // À la souris, cliquer une touche ne doit pas lui donner le focus : sinon
+  // Entrée (pour valider) « re-taperait » la même touche.
+  numpad.addEventListener('mousedown', (e) => e.preventDefault());
   submitBtn.addEventListener('click', checkAnswer);
   nextBtn.addEventListener('click', nextQuestion);
   $('#quit-btn').addEventListener('click', () => {
@@ -298,9 +303,13 @@
   document.addEventListener('keydown', (e) => {
     if (E.screens.current() !== 'screen-play') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const onButton = e.target.closest && e.target.closest('button');
+    const button = e.target.closest && e.target.closest('button');
+    const inFlow = button && button.closest('#numpad, #submit-btn, #next-btn');
     if (e.key === 'Enter') {
-      if (onButton) return;                    // le bouton gère déjà son propre « clic »
+      // Un bouton hors du flux de jeu (« Changer les tables ») garde son propre
+      // comportement. Pour les autres on prend la main et on annule le « clic »
+      // que le navigateur enverrait en plus : sinon la question avance deux fois.
+      if (button && !inFlow) return;
       e.preventDefault();
       if (answered) nextQuestion(); else checkAnswer();
     } else if (/^[0-9]$/.test(e.key)) {
@@ -426,6 +435,22 @@
   $('#print-btn').addEventListener('click', () => window.print());
   $('#again-btn').addEventListener('click', () => startGame(lastOps));
   $('#home-btn').addEventListener('click', () => E.screens.show('screen-home'));
+
+  /* ------------------------------------------------------------ Mises à jour */
+  // Une nouvelle version n'est appliquée que depuis l'accueil : jamais en plein
+  // milieu d'une partie ni pendant la lecture du bilan. Le service worker prend
+  // la main (apply), puis la page se recharge quand il contrôle réellement la page.
+  E.on('sw:updateready', (update) => {
+    let off = null;
+    const applyIfHome = () => {
+      if (E.screens.current() !== 'screen-home') return;
+      if (off) off();
+      navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), { once: true });
+      update.apply();
+    };
+    off = E.on('screen:show', applyIfHome);
+    applyIfHome();
+  });
 
   /* ---------------------------------------------------------------- Démarrage */
   loadPrefs();
