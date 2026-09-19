@@ -8,7 +8,7 @@
  *     puis ajoute tout nouveau fichier statique a APP_SHELL ci-dessous.
  */
 self.APP_SLUG = 'tables-addition';
-self.APP_VERSION = 'v1.0.3';
+self.APP_VERSION = 'v1.0.4';
 
 self.APP_SHELL = [
   './',
@@ -17,6 +17,7 @@ self.APP_SHELL = [
   './app.js',
   './data.js',
   './manifest.json',
+  './diag.html',
   './favicon.ico',
   './engine/engine.js',
   './engine/engine.css',

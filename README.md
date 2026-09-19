@@ -83,6 +83,15 @@ Clés `localStorage`, préfixées par `tables-addition:` :
 Le lien **« Réinitialiser la progression »** efface `errors`, `streak` et `daily`
 (il **garde** les tables cochées et l'option son).
 
+## Diagnostic
+
+En bas de l'écran d'accueil, à côté de « Réinitialiser la progression », le lien
+**Diagnostic** ouvre [`diag.html`](diag.html) : ce que l'appli a en mémoire sur l'appareil (clés
+`tables-*`, espace utilisé, service worker, caches) et un **journal des 30
+dernières ouvertures** (clé `diag:log`, hors espace de l'appli) qui permet de
+situer un éventuel effacement des données. Boutons **Copier** et **Partager**.
+Lecture seule, rien n'est envoyé.
+
 ## Démarrage local
 
 ```bash
@@ -141,6 +150,7 @@ Les couleurs et proportions sont en haut du script. Il écrit `icons/*.png` et
 |---|---|
 | `index.html` | Structure des 3 écrans (accueil / partie / bilan) |
 | `data.js` | Réglages et contenu (`window.APP_DATA`) |
+| `diag.html` | Page de diagnostic (lecture seule) : clés enregistrées, journal des ouvertures, caches |
 | `app.js` | Logique du jeu et du bilan |
 | `app.css` | Styles (importe `engine/engine.css`) |
 | `manifest.json` | Config PWA (nom, couleurs, icônes) |
