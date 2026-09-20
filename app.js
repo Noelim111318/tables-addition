@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 'v1.2.1';
+  const APP_VERSION = 'v1.3.0';
   const APP_ID = 'tables-addition';
   const E = window.AppEngine;
   const D = window.APP_DATA;
@@ -15,33 +15,12 @@
   E.boot({
     id: APP_ID,
     version: APP_VERSION,
-    autoReload: false,      // voir « Mises à jour » plus bas : jamais en pleine partie
+    updateWhen: true,       // une nouvelle version ne s'applique que depuis l'accueil, jamais en pleine partie
     strings: {
-      weekNotPlayed: 'pas joué',
       weekSummary: (seen, days, rate) =>
         `${seen} questions sur ${days} jour${days > 1 ? 's' : ''} — ${rate}% de réussite`,
-      streak: (n) => `🔥 ${n} jour${n > 1 ? 's' : ''} d'affilée`,
-      installIosHint: 'Sur iPhone/iPad : touche « Partager » (le carré avec une flèche vers le haut), '
-        + 'puis « Sur l\'écran d\'accueil ».',
     },
   });
-
-  /* ------------------------------------------------- Journal des ouvertures */
-  // Diagnostic (voir diag.html) : garde les 30 dernières ouvertures (heure,
-  // version, mode, clés de progression présentes) dans une clé hors espace de
-  // l'appli, pour situer un éventuel effacement des données.
-  (function logOpening() {
-    try {
-      const own = E.store.keys();
-      const log = JSON.parse(localStorage.getItem('diag:log') || '[]');
-      log.push({
-        t: new Date().toISOString(), a: APP_ID, v: APP_VERSION,
-        m: window.matchMedia('(display-mode: standalone)').matches ? 1 : 0,
-        k: ['prefs', 'errors', 'streak', 'daily'].filter((k) => own.includes(k)).join(','),
-      });
-      localStorage.setItem('diag:log', JSON.stringify(log.slice(-30)));
-    } catch (e) { /* ignore */ }
-  })();
 
   /* ------------------------------------------------------------------ État */
   let selected = [];            // tables cochées
@@ -403,21 +382,8 @@
     E.history.bumpStreak();
     E.history.logDaily(seen, correctCount);
     E.history.renderStreak('#streak-badge');
-    requestPersistence();
   }
 
-  // Demande au navigateur de ne pas purger le stockage local (historique, série).
-  // Chrome l'accorde d'office aux applis installées ; Firefox interroge
-  // l'utilisateur, d'où un seul essai, après une première partie plutôt qu'au
-  // démarrage. Sans effet là où l'API n'existe pas.
-  let persistAsked = false;
-  function requestPersistence() {
-    if (persistAsked || !(navigator.storage && navigator.storage.persist)) return;
-    persistAsked = true;
-    navigator.storage.persisted()
-      .then((yes) => yes || navigator.storage.persist())
-      .catch(() => { /* ignore */ });
-  }
 
   /* ------------------------------------------------------------ Chronomètre */
   // « Contre la montre » : on mesure le temps total de la partie (les questions ratées qui
@@ -598,22 +564,6 @@
   $('#print-btn').addEventListener('click', () => window.print());
   $('#again-btn').addEventListener('click', () => startGame(lastOps, lastRecordKey));
   $('#home-btn').addEventListener('click', () => E.screens.show('screen-home'));
-
-  /* ------------------------------------------------------------ Mises à jour */
-  // Une nouvelle version n'est appliquée que depuis l'accueil : jamais en plein
-  // milieu d'une partie ni pendant la lecture du bilan. Le service worker prend
-  // la main (apply), puis la page se recharge quand il contrôle réellement la page.
-  E.on('sw:updateready', (update) => {
-    let off = null;
-    const applyIfHome = () => {
-      if (E.screens.current() !== 'screen-home') return;
-      if (off) off();
-      navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), { once: true });
-      update.apply();
-    };
-    off = E.on('screen:show', applyIfHome);
-    applyIfHome();
-  });
 
   /* ---------------------------------------------------------------- Démarrage */
   loadPrefs();

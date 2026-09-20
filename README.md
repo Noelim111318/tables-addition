@@ -95,12 +95,21 @@ Le lien **« Réinitialiser la progression »** efface `errors`, `streak`, `dail
 
 ## Diagnostic
 
-En bas de l'écran d'accueil, à côté de « Réinitialiser la progression », le lien
-**Diagnostic** ouvre [`diag.html`](diag.html) : ce que l'appli a en mémoire sur l'appareil (clés
-`tables-*`, espace utilisé, service worker, caches) et un **journal des 30
-dernières ouvertures** (clé `diag:log`, hors espace de l'appli) qui permet de
-situer un éventuel effacement des données. Boutons **Copier** et **Partager**.
-Lecture seule, rien n'est envoyé.
+En bas de l'écran d'accueil, le lien **Diagnostic** ouvre [`diag.html`](diag.html), un rapport
+complet en lecture seule (moteur `engine/diag.js`) :
+
+- un **résumé avec verdicts** (✅ / ⚠️ / ❌) ;
+- la **cohérence des versions** (HTML, script, service worker, manifest, caches, service worker
+  actif) : elle repère un état « mélangé » pendant une mise à jour ;
+- le **précache** complet ou non (tous les fichiers de `APP_SHELL` sont-ils dans le cache ?) ;
+- le **journal des 30 dernières ouvertures** (`diag:log:<id>`), avec la détection des données
+  qui **disparaissent** d'une ouverture à la suivante ;
+- les **erreurs JavaScript** récentes (`diag:errors:<id>`), le stockage, les service workers, les
+  caches et l'appareil.
+
+Boutons **Copier**, **Partager**, **Enregistrer (.txt)**, **Vérifier les mises à jour** et
+**Relancer**. Rien n'est envoyé ; les valeurs des autres applis de la même origine ne sont pas
+affichées (noms seulement).
 
 ## Démarrage local
 
@@ -124,10 +133,14 @@ Dépôt : https://github.com/Noelim111318/tables-addition
 
 ## Livrer une nouvelle version
 
-1. `./tools/bump-version.sh vX.Y.Z` — bumpe la version dans `index.html`,
-   `app.js`, `service-worker.js` et `manifest.json` d'un coup.
-2. Ajoute tout nouveau fichier statique à `APP_SHELL` dans `service-worker.js`.
-3. Déploie : les appareils déjà installés se mettent à jour tout seuls.
+1. `./tools/check-app.sh --compat <dernière-révision-publiée>` — versions alignées, `APP_SHELL`
+   complet, identifiants utilisés par le JS présents, et **aucun identifiant renommé** (pendant
+   une mise à jour, l'ancien JS tourne un moment sur le nouveau HTML).
+2. `./tools/bump-version.sh vX.Y.Z` — bumpe la version dans `index.html`, `app.js`,
+   `service-worker.js` et `manifest.json` d'un coup.
+3. Ajoute tout nouveau fichier statique à `APP_SHELL` dans `service-worker.js`.
+4. Déploie : les appareils déjà installés se mettent à jour tout seuls (au prochain passage par
+   l'accueil, jamais en pleine partie).
 
 ## Mettre à jour le moteur
 
@@ -160,14 +173,14 @@ Les couleurs et proportions sont en haut du script. Il écrit `icons/*.png` et
 |---|---|
 | `index.html` | Structure des 3 écrans (accueil / partie / bilan) |
 | `data.js` | Réglages et contenu (`window.APP_DATA`) |
-| `diag.html` | Page de diagnostic (lecture seule) : clés enregistrées, journal des ouvertures, caches |
+| `diag.html` | Page de diagnostic complet (lecture seule), rapport produit par `engine/diag.js` |
 | `app.js` | Logique du jeu et du bilan |
 | `app.css` | Styles (importe `engine/engine.css`) |
 | `manifest.json` | Config PWA (nom, couleurs, icônes) |
 | `service-worker.js` | Identité du cache + liste des fichiers ; logique dans `engine/sw-core.js` |
 | `engine/` | Le moteur PWA (copie de `toolbox/pwa-engine`) |
 | `icons/`, `favicon.ico` | Icônes de l'appli |
-| `tools/` | `make-icons.py` (icônes), `bump-version.sh` (version) |
+| `tools/` | `make-icons.py` (icônes), `bump-version.sh` (version), `check-app.sh` (contrôle avant livraison) |
 
 ## Idées d'évolution
 
