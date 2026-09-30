@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 'v1.3.0';
+  const APP_VERSION = 'v1.3.1';
   const APP_ID = 'tables-addition';
   const E = window.AppEngine;
   const D = window.APP_DATA;
